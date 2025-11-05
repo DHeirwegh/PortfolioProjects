@@ -1,0 +1,7 @@
+{
+  "name": "json-optimized",
+  "version": "1.0.0",
+  "dependencies": [
+    "jsoncpp"
+  ]
+}
