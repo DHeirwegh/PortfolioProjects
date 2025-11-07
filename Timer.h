@@ -6,13 +6,22 @@
 class Timer
 {
 public:
-	Timer() : m_StartTimepoint(std::chrono::high_resolution_clock::now())
+	Timer()
 	{
+		// Initialize to current time to avoid garbage values
+		m_StartTimepoint = std::chrono::high_resolution_clock::now();
 	}
 
 	~Timer()
 	{
 		Stop();
+	}
+
+	void Start()
+	{
+		m_StartTimepoint = std::chrono::high_resolution_clock::now();
+		m_Stopped = false;
+		m_Duration = 0;
 	}
 
 	void Stop()
@@ -30,8 +39,7 @@ public:
 
 	void Print() const
 	{
-		long long duration = m_Stopped ? m_Duration : ElapsedMilliseconds();
-		std::cout << "Duration: " << duration << "ms\n";
+		std::cout << "Duration: " << ElapsedMilliseconds() / 1000 << "s\n";
 	}
 
 	void Reset()
