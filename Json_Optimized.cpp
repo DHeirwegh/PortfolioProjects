@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <chrono>
+#include <ctime>
 #include "Timer.h"
 #include "json/json.h"
 
@@ -75,20 +77,30 @@ int main()
 	std::cout << "Avg (middle 8): " << (avgMiddle8 / 1000.0) << "s\n";
 
 	// Write results to file
-	std::ofstream outFile("benchmark_results.txt");
+	std::ofstream outFile("benchmark_results.txt", std::ios::app);
 	if (outFile.is_open())
 	{
-		outFile << "=== JsonCpp Benchmark Results ===\n";
+		// Get current date/time for the timestamp
+		auto now = std::chrono::system_clock::now();
+		auto time = std::chrono::system_clock::to_time_t(now);
+		char timeStr[100];
+		tm timeInfo;
+		localtime_s(&timeInfo, &time);
+		std::strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeInfo);
+		
+		outFile << "\n=== JsonCpp Benchmark Results ===\n";
+		outFile << "Date/Time: " << timeStr << "\n";
 		outFile << "Total Runs: " << NUM_RUNS << "\n";
 		outFile << "Number of elements: " << root.size() << "\n\n";
 		
-		outFile << "\nStatistics:\n";
+		outFile << "Statistics:\n";
 		outFile << "Min time: " << (minDuration / 1000.0) << "s\n";
 		outFile << "Max time: " << (maxDuration / 1000.0) << "s\n";
 		outFile << "Avg (middle 8): " << (avgMiddle8 / 1000.0) << "s\n";
+		outFile << "----------------------------------------\n";
 		
 		outFile.close();
-		std::cout << "\nResults written to benchmark_results.txt\n";
+		std::cout << "\nResults appended to benchmark_results.txt\n";
 	}
 	else
 	{
