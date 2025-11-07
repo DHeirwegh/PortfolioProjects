@@ -12,7 +12,6 @@
 #endif // if !defined(JSON_IS_AMALGAMATION)
 #include <algorithm>
 #include <cassert>
-#include <cerrno>
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -46,6 +45,7 @@ static size_t const stackLimit_g =
     JSONCPP_DEPRECATED_STACK_LIMIT; // see readValue()
 
 namespace Json {
+
 using CharReaderPtr = std::unique_ptr<CharReader>;
 
 // Implementation of class Features
@@ -277,7 +277,7 @@ bool Reader::readToken(Token& token) {
     ok = match("ull", 3);
     break;
   case ',':
-token.type_ = tokenArraySeparator;
+    token.type_ = tokenArraySeparator;
     break;
   case ':':
     token.type_ = tokenMemberSeparator;
@@ -543,8 +543,7 @@ bool Reader::decodeNumber(Token& token, Value& decoded) {
     auto digit(static_cast<Value::UInt>(c - '0'));
     if (value >= threshold) {
       // We've hit or exceeded the max value divided by 10 (rounded down). If
-      // a) we've only just touched the limit, meaning value == threshold,
-      // b) this is the last digit, or
+      // a) we've only just touched the limit, b) this is the last digit, and
       // c) it's small enough to fit in that rounding delta, we're okay.
       // Otherwise treat this number as a double to avoid overflow.
       if (value > threshold || current != token.end_ ||
@@ -576,37 +575,17 @@ bool Reader::decodeDouble(Token& token) {
 }
 
 bool Reader::decodeDouble(Token& token, Value& decoded) {
-  // Optimize: use strtod directly instead of stringstream
-  // Create a null-terminated string for strtod
-  std::string numStr(token.start_, token.end_);
-
-  char* endPtr = nullptr;
-  errno = 0;
-  double value = std::strtod(numStr.c_str(), &endPtr);
-
-  // Check for conversion errors
-  if (endPtr == numStr.c_str()) {
-    return addError(
-        "'" + String(token.start_, token.end_) + "' is not a number.", token);
-  }
-
-  // Check for range errors
-  if (errno == ERANGE) {
-    if (value == HUGE_VAL)
+  double value = 0;
+  IStringStream is(String(token.start_, token.end_));
+  if (!(is >> value)) {
+    if (value == std::numeric_limits<double>::max())
       value = std::numeric_limits<double>::infinity();
-    else if (value == -HUGE_VAL)
-    value = -std::numeric_limits<double>::infinity();
-  }
-
-  // Check if we consumed the entire string
-  if (endPtr != numStr.c_str() + numStr.size()) {
-    // Partial parse - check if remaining chars are valid
-    if (!std::isinf(value) && !std::isnan(value)) {
+    else if (value == std::numeric_limits<double>::lowest())
+      value = -std::numeric_limits<double>::infinity();
+    else if (!std::isinf(value))
       return addError(
           "'" + String(token.start_, token.end_) + "' is not a number.", token);
-    }
   }
-
   decoded = value;
   return true;
 }
@@ -626,46 +605,28 @@ bool Reader::decodeString(Token& token, String& decoded) {
   decoded.reserve(static_cast<size_t>(token.end_ - token.start_ - 2));
   Location current = token.start_ + 1; // skip '"'
   Location end = token.end_ - 1;       // do not include '"'
-  
-  // Batch copy optimization: copy runs of non-escape characters at once
-  Location runStart = current;
-  
   while (current != end) {
-    Char c = *current;
-    
-    if (c == '"') {
-      // Append any remaining run before the closing quote
-   if (current > runStart) {
-  decoded.append(runStart, current);
-      }
+    Char c = *current++;
+    if (c == '"')
       break;
-    }
-    
     if (c == '\\') {
-      // Append the run of normal characters before this escape
-      if (current > runStart) {
-        decoded.append(runStart, current);
-      }
-      
-      ++current;
       if (current == end)
         return addError("Empty escape sequence in string", token, current);
-      
       Char escape = *current++;
       switch (escape) {
       case '"':
         decoded += '"';
-     break;
-case '/':
+        break;
+      case '/':
         decoded += '/';
- break;
+        break;
       case '\\':
         decoded += '\\';
         break;
       case 'b':
         decoded += '\b';
         break;
-    case 'f':
+      case 'f':
         decoded += '\f';
         break;
       case 'n':
@@ -681,29 +642,21 @@ case '/':
         unsigned int unicode;
         if (!decodeUnicodeCodePoint(token, current, end, unicode))
           return false;
-     decoded += codePointToUTF8(unicode);
+        decoded += codePointToUTF8(unicode);
       } break;
       default:
-  return addError("Bad escape sequence in string", token, current);
+        return addError("Bad escape sequence in string", token, current);
       }
-      
-      // Start a new run after the escape sequence
-   runStart = current;
     } else {
-      ++current;
+      decoded += c;
     }
   }
-  
-  // Append final run if there is one
-  if (current > runStart && current <= end) {
-  decoded.append(runStart, current);
-  }
-  
   return true;
 }
 
 bool Reader::decodeUnicodeCodePoint(Token& token, Location& current,
                                     Location end, unsigned int& unicode) {
+
   if (!decodeUnicodeEscapeSequence(token, current, end, unicode))
     return false;
   if (unicode >= 0xD800 && unicode <= 0xDBFF) {
@@ -1266,7 +1219,7 @@ bool OurReader::readToken(Token& token) {
     }
     break;
   case ',':
-token.type_ = tokenArraySeparator;
+    token.type_ = tokenArraySeparator;
     break;
   case ':':
     token.type_ = tokenMemberSeparator;
@@ -1437,7 +1390,6 @@ bool OurReader::readNumber(bool checkInf) {
   }
   return true;
 }
-
 bool OurReader::readString() {
   Char c = 0;
   while (current_ != end_) {
@@ -1571,21 +1523,54 @@ bool OurReader::decodeNumber(Token& token, Value& decoded) {
   // larger than the maximum supported value of an integer then
   // we decode the number as a double.
   Location current = token.start_;
-  bool isNegative = *current == '-';
-  if (isNegative)
+  const bool isNegative = *current == '-';
+  if (isNegative) {
     ++current;
-  // TODO: Help the compiler do the div and mod at compile time or get rid of
-  // them.
-  Value::LargestUInt maxIntegerValue =
-      isNegative ? Value::LargestUInt(Value::maxLargestInt) + 1
-                 : Value::maxLargestUInt;
-  Value::LargestUInt threshold = maxIntegerValue / 10;
+  }
+
+  // We assume we can represent the largest and smallest integer types as
+  // unsigned integers with separate sign. This is only true if they can fit
+  // into an unsigned integer.
+  static_assert(Value::maxLargestInt <= Value::maxLargestUInt,
+                "Int must be smaller than UInt");
+
+  // We need to convert minLargestInt into a positive number. The easiest way
+  // to do this conversion is to assume our "threshold" value of minLargestInt
+  // divided by 10 can fit in maxLargestInt when absolute valued. This should
+  // be a safe assumption.
+  static_assert(Value::minLargestInt <= -Value::maxLargestInt,
+                "The absolute value of minLargestInt must be greater than or "
+                "equal to maxLargestInt");
+  static_assert(Value::minLargestInt / 10 >= -Value::maxLargestInt,
+                "The absolute value of minLargestInt must be only 1 magnitude "
+                "larger than maxLargest Int");
+
+  static constexpr Value::LargestUInt positive_threshold =
+      Value::maxLargestUInt / 10;
+  static constexpr Value::UInt positive_last_digit = Value::maxLargestUInt % 10;
+
+  // For the negative values, we have to be more careful. Since typically
+  // -Value::minLargestInt will cause an overflow, we first divide by 10 and
+  // then take the inverse. This assumes that minLargestInt is only a single
+  // power of 10 different in magnitude, which we check above. For the last
+  // digit, we take the modulus before negating for the same reason.
+  static constexpr auto negative_threshold =
+      Value::LargestUInt(-(Value::minLargestInt / 10));
+  static constexpr auto negative_last_digit =
+      Value::UInt(-(Value::minLargestInt % 10));
+
+  const Value::LargestUInt threshold =
+      isNegative ? negative_threshold : positive_threshold;
+  const Value::UInt max_last_digit =
+      isNegative ? negative_last_digit : positive_last_digit;
+
   Value::LargestUInt value = 0;
   while (current < token.end_) {
     Char c = *current++;
     if (c < '0' || c > '9')
       return decodeDouble(token, decoded);
-    auto digit(static_cast<Value::UInt>(c - '0'));
+
+    const auto digit(static_cast<Value::UInt>(c - '0'));
     if (value >= threshold) {
       // We've hit or exceeded the max value divided by 10 (rounded down). If
       // a) we've only just touched the limit, meaning value == threshold,
@@ -1593,20 +1578,23 @@ bool OurReader::decodeNumber(Token& token, Value& decoded) {
       // c) it's small enough to fit in that rounding delta, we're okay.
       // Otherwise treat this number as a double to avoid overflow.
       if (value > threshold || current != token.end_ ||
-          digit > maxIntegerValue % 10) {
+          digit > max_last_digit) {
         return decodeDouble(token, decoded);
       }
     }
     value = value * 10 + digit;
   }
-  if (isNegative && value == maxIntegerValue)
-    decoded = Value::minLargestInt;
-  else if (isNegative)
-    decoded = -Value::LargestInt(value);
-  else if (value <= Value::LargestUInt(Value::maxInt))
+
+  if (isNegative) {
+    // We use the same magnitude assumption here, just in case.
+    const auto last_digit = static_cast<Value::UInt>(value % 10);
+    decoded = -Value::LargestInt(value / 10) * 10 - last_digit;
+  } else if (value <= Value::LargestUInt(Value::maxLargestInt)) {
     decoded = Value::LargestInt(value);
-  else
+  } else {
     decoded = value;
+  }
+
   return true;
 }
 
@@ -1621,37 +1609,17 @@ bool OurReader::decodeDouble(Token& token) {
 }
 
 bool OurReader::decodeDouble(Token& token, Value& decoded) {
-  // Optimize: use strtod directly instead of stringstream
-  // Create a null-terminated string for strtod
-  std::string numStr(token.start_, token.end_);
-
-  char* endPtr = nullptr;
-  errno = 0;
-  double value = std::strtod(numStr.c_str(), &endPtr);
-
-  // Check for conversion errors
-  if (endPtr == numStr.c_str()) {
-    return addError(
-        "'" + String(token.start_, token.end_) + "' is not a number.", token);
-  }
-
-  // Check for range errors
-  if (errno == ERANGE) {
-    if (value == HUGE_VAL)
+  double value = 0;
+  IStringStream is(String(token.start_, token.end_));
+  if (!(is >> value)) {
+    if (value == std::numeric_limits<double>::max())
       value = std::numeric_limits<double>::infinity();
-    else if (value == -HUGE_VAL)
-    value = -std::numeric_limits<double>::infinity();
-  }
-
-  // Check if we consumed the entire string
-  if (endPtr != numStr.c_str() + numStr.size()) {
-    // Partial parse - check if remaining chars are valid
-    if (!std::isinf(value) && !std::isnan(value)) {
+    else if (value == std::numeric_limits<double>::lowest())
+      value = -std::numeric_limits<double>::infinity();
+    else if (!std::isinf(value))
       return addError(
           "'" + String(token.start_, token.end_) + "' is not a number.", token);
-    }
   }
-
   decoded = value;
   return true;
 }
@@ -1671,46 +1639,28 @@ bool OurReader::decodeString(Token& token, String& decoded) {
   decoded.reserve(static_cast<size_t>(token.end_ - token.start_ - 2));
   Location current = token.start_ + 1; // skip '"'
   Location end = token.end_ - 1;       // do not include '"'
-  
-  // Batch copy optimization: copy runs of non-escape characters at once
-  Location runStart = current;
-  
   while (current != end) {
-    Char c = *current;
-    
-    if (c == '"') {
-      // Append any remaining run before the closing quote
-   if (current > runStart) {
-  decoded.append(runStart, current);
-      }
+    Char c = *current++;
+    if (c == '"')
       break;
-    }
-    
     if (c == '\\') {
-      // Append the run of normal characters before this escape
-      if (current > runStart) {
-        decoded.append(runStart, current);
-      }
-      
-      ++current;
       if (current == end)
         return addError("Empty escape sequence in string", token, current);
-      
       Char escape = *current++;
       switch (escape) {
       case '"':
         decoded += '"';
-     break;
-case '/':
+        break;
+      case '/':
         decoded += '/';
- break;
+        break;
       case '\\':
         decoded += '\\';
         break;
       case 'b':
         decoded += '\b';
         break;
-    case 'f':
+      case 'f':
         decoded += '\f';
         break;
       case 'n':
@@ -1726,29 +1676,21 @@ case '/':
         unsigned int unicode;
         if (!decodeUnicodeCodePoint(token, current, end, unicode))
           return false;
-     decoded += codePointToUTF8(unicode);
+        decoded += codePointToUTF8(unicode);
       } break;
       default:
-  return addError("Bad escape sequence in string", token, current);
+        return addError("Bad escape sequence in string", token, current);
       }
-      
-      // Start a new run after the escape sequence
-   runStart = current;
     } else {
-      ++current;
+      decoded += c;
     }
   }
-  
-  // Append final run if there is one
-  if (current > runStart && current <= end) {
-  decoded.append(runStart, current);
-  }
-  
   return true;
 }
 
 bool OurReader::decodeUnicodeCodePoint(Token& token, Location& current,
                                        Location end, unsigned int& unicode) {
+
   if (!decodeUnicodeEscapeSequence(token, current, end, unicode))
     return false;
   if (unicode >= 0xD800 && unicode <= 0xDBFF) {
@@ -1890,6 +1832,7 @@ OurReader::getStructuredErrors() const {
 }
 
 class OurCharReader : public CharReader {
+
 public:
   OurCharReader(bool collectComments, OurFeatures const& features)
       : CharReader(
@@ -2058,4 +2001,5 @@ IStream& operator>>(IStream& sin, Value& root) {
   }
   return sin;
 }
+
 } // namespace Json
