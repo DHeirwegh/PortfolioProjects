@@ -5,6 +5,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <algorithm>
 #include "Timer.h"
 #include "json/json.h"
 
@@ -12,21 +13,28 @@ int main()
 {
 	std::cout << "=== JsonCpp Performance Testing ===\n\n";
 
-	// Test 1: Read JSON file from disk
-	std::cout << "Test 1: Reading random_data.json from disk...\n";
-	std::ifstream file("random_data.json", std::ifstream::binary);
-	if (!file.is_open())
-	{
-		std::cerr << "Error: Could not open random_data.json\n";
-		return 1;
-	}
-
-	// Test 2: Parse JSON with JsonCpp
-	std::cout << "\nTest 2: Parsing JSON with JsonCpp...\n";
+	// Test 2: Parse JSON with JsonCpp - Run 10 times for benchmarking
+	std::cout << "Test: Parsing JSON with JsonCpp (10 runs)...\n";
+	
+	const int NUM_RUNS = 10;
+	std::vector<double> durations;
+	durations.reserve(NUM_RUNS);
+	
 	Json::Value root;
+	
+	for (int run = 0; run < NUM_RUNS; ++run)
 	{
+		// Open file for each run
+		std::ifstream file("random_data.json", std::ifstream::binary);
+		if (!file.is_open())
+		{
+			std::cerr << "Error: Could not open random_data.json\n";
+			return 1;
+		}
+		
 		Timer timer;
 		timer.Start();
+		
 		Json::CharReaderBuilder builder;
 		std::string errs;
 
@@ -37,10 +45,55 @@ int main()
 		}
 
 		timer.Stop();
-		std::cout << "Number of elements: " << root.size() << "\n";
-		timer.Print();
+		double elapsed = timer.ElapsedMilliseconds();
+		durations.push_back(elapsed);
+		
+		std::cout << "  Run " << (run + 1) << ": " << (elapsed / 1000.0) << "s\n";
+		
+		file.close();
 	}
-	file.close();
+	
+	// Sort durations to find min, max, and calculate average of middle 8
+	std::vector<double> sortedDurations = durations;
+	std::sort(sortedDurations.begin(), sortedDurations.end());
+	
+	double minDuration = sortedDurations.front();
+	double maxDuration = sortedDurations.back();
+	
+	// Calculate average of middle 8 (exclude min and max)
+	double sum = 0.0;
+	for (size_t i = 1; i < sortedDurations.size() - 1; ++i)
+	{
+		sum += sortedDurations[i];
+	}
+	double avgMiddle8 = sum / 8.0;
+	
+	std::cout << "\n=== Benchmark Results ===\n";
+	std::cout << "Number of elements: " << root.size() << "\n";
+	std::cout << "Min time:  " << (minDuration / 1000.0) << "s\n";
+	std::cout << "Max time:  " << (maxDuration / 1000.0) << "s\n";
+	std::cout << "Avg (middle 8): " << (avgMiddle8 / 1000.0) << "s\n";
+
+	// Write results to file
+	std::ofstream outFile("benchmark_results.txt");
+	if (outFile.is_open())
+	{
+		outFile << "=== JsonCpp Benchmark Results ===\n";
+		outFile << "Total Runs: " << NUM_RUNS << "\n";
+		outFile << "Number of elements: " << root.size() << "\n\n";
+		
+		outFile << "\nStatistics:\n";
+		outFile << "Min time: " << (minDuration / 1000.0) << "s\n";
+		outFile << "Max time: " << (maxDuration / 1000.0) << "s\n";
+		outFile << "Avg (middle 8): " << (avgMiddle8 / 1000.0) << "s\n";
+		
+		outFile.close();
+		std::cout << "\nResults written to benchmark_results.txt\n";
+	}
+	else
+	{
+		std::cerr << "Warning: Could not write to benchmark_results.txt\n";
+	}
 
 	//// Test 3: Iterate through JSON array
 	//std::cout << "\nTest 3: Iterating through all elements...\n";
