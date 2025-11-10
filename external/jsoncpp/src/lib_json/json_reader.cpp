@@ -318,8 +318,8 @@ void Reader::skipSpaces() {
     
     // Combine all whitespace matches
     __m128i is_ws = _mm_or_si128(
-        _mm_or_si128(eq_space, eq_tab),
-     _mm_or_si128(eq_cr, eq_lf)
+    _mm_or_si128(eq_space, eq_tab),
+        _mm_or_si128(eq_cr, eq_lf)
     );
   
     // Convert to bitmask
@@ -331,12 +331,12 @@ void Reader::skipSpaces() {
       int non_ws_mask = ~mask & 0xFFFF;
       #ifdef _MSC_VER
         unsigned long idx;
-        _BitScanForward(&idx, non_ws_mask);
-  current_ += idx;
+    _BitScanForward(&idx, non_ws_mask);
+     current_ += idx;
       #else
         current_ += __builtin_ctz(non_ws_mask);
-      #endif
-      return;
+  #endif
+  return;
     }
     
     // All 16 bytes were whitespace, continue
@@ -350,7 +350,7 @@ void Reader::skipSpaces() {
     if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
     ++current_;
     else
- break;
+      break;
   }
 }
 
@@ -1284,8 +1284,8 @@ void OurReader::skipSpaces() {
     
     // Combine all whitespace matches
     __m128i is_ws = _mm_or_si128(
-        _mm_or_si128(eq_space, eq_tab),
-     _mm_or_si128(eq_cr, eq_lf)
+    _mm_or_si128(eq_space, eq_tab),
+        _mm_or_si128(eq_cr, eq_lf)
     );
   
     // Convert to bitmask
@@ -1297,12 +1297,12 @@ void OurReader::skipSpaces() {
       int non_ws_mask = ~mask & 0xFFFF;
       #ifdef _MSC_VER
         unsigned long idx;
-        _BitScanForward(&idx, non_ws_mask);
-  current_ += idx;
+    _BitScanForward(&idx, non_ws_mask);
+     current_ += idx;
       #else
         current_ += __builtin_ctz(non_ws_mask);
-      #endif
-      return;
+  #endif
+  return;
     }
     
     // All 16 bytes were whitespace, continue
@@ -1316,7 +1316,7 @@ void OurReader::skipSpaces() {
     if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
     ++current_;
     else
- break;
+      break;
   }
 }
 

@@ -66,7 +66,7 @@ int main()
 	{
 		sum += sortedDurations[i];
 	}
-	double avgMiddle8 = sum / NUM_RUNS;
+	double avgMiddle8 = sum / (NUM_RUNS-2);
 	
 	std::cout << "\n=== Benchmark Results ===\n";
 	std::cout << "Number of elements: " << root.size() << "\n";
