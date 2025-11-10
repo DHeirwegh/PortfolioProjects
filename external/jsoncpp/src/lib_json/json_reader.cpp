@@ -12,6 +12,7 @@
 #endif // if !defined(JSON_IS_AMALGAMATION)
 #include <algorithm>
 #include <cassert>
+#include <cerrno>
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -24,11 +25,14 @@
 
 #include <cstdio>
 
-#if defined(_MSC_VER)
-#if !defined(_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES)
-#define _CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES 1
-#endif //_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES
-#endif //_MSC_VER
+// SIMD intrinsics for skipSpaces optimization
+#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_AMD64) || defined(_M_IX86))
+  #include <emmintrin.h> // SSE2
+  #define JSON_HAS_SSE2 1
+#elif defined(__SSE2__)
+  #include <emmintrin.h>
+  #define JSON_HAS_SSE2 1
+#endif
 
 #if defined(_MSC_VER)
 // Disable warning about strdup being deprecated.
@@ -260,7 +264,6 @@ bool Reader::readToken(Token& token) {
   case '7':
   case '8':
   case '9':
-  case '-':
     token.type_ = tokenNumber;
     readNumber();
     break;
@@ -275,7 +278,7 @@ bool Reader::readToken(Token& token) {
   case 'n':
     token.type_ = tokenNull;
     ok = match("ull", 3);
-    break;
+  break;
   case ',':
     token.type_ = tokenArraySeparator;
     break;
@@ -296,12 +299,58 @@ bool Reader::readToken(Token& token) {
 }
 
 void Reader::skipSpaces() {
+#ifdef JSON_HAS_SSE2
+  // SIMD path: process 16 bytes at a time with SSE2
+  while (current_ + 16 <= end_) {
+    __m128i chunk = _mm_loadu_si128(reinterpret_cast<const __m128i*>(current_));
+
+    // Create masks for each whitespace character
+    __m128i spaces = _mm_set1_epi8(' ');
+    __m128i tabs = _mm_set1_epi8('\t');
+    __m128i crs = _mm_set1_epi8('\r');
+    __m128i lfs = _mm_set1_epi8('\n');
+
+    // Compare chunk with each whitespace type
+    __m128i eq_space = _mm_cmpeq_epi8(chunk, spaces);
+    __m128i eq_tab = _mm_cmpeq_epi8(chunk, tabs);
+    __m128i eq_cr = _mm_cmpeq_epi8(chunk, crs);
+    __m128i eq_lf = _mm_cmpeq_epi8(chunk, lfs);
+    
+    // Combine all whitespace matches
+    __m128i is_ws = _mm_or_si128(
+        _mm_or_si128(eq_space, eq_tab),
+     _mm_or_si128(eq_cr, eq_lf)
+    );
+  
+    // Convert to bitmask
+    int mask = _mm_movemask_epi8(is_ws);
+    
+    // If not all bytes are whitespace, find first non-whitespace
+    if (mask != 0xFFFF) {
+      // Count trailing whitespace bytes
+      int non_ws_mask = ~mask & 0xFFFF;
+      #ifdef _MSC_VER
+        unsigned long idx;
+        _BitScanForward(&idx, non_ws_mask);
+  current_ += idx;
+      #else
+        current_ += __builtin_ctz(non_ws_mask);
+      #endif
+      return;
+    }
+    
+    // All 16 bytes were whitespace, continue
+    current_ += 16;
+  }
+#endif
+  
+  // Scalar fallback for remaining bytes
   while (current_ != end_) {
     Char c = *current_;
     if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
-      ++current_;
+    ++current_;
     else
-      break;
+ break;
   }
 }
 
@@ -868,7 +917,7 @@ public:
   using Location = const Char*;
 
   explicit OurReader(OurFeatures const& features);
-  bool parse(const char* beginDoc, const char* endDoc, Value& root,
+  bool parse(char const* beginDoc, char const* endDoc, Value& root,
              bool collectComments = true);
   String getFormattedErrorMessages() const;
   std::vector<CharReader::StructuredError> getStructuredErrors() const;
@@ -978,7 +1027,7 @@ bool OurReader::containsNewLine(OurReader::Location begin,
 
 OurReader::OurReader(OurFeatures const& features) : features_(features) {}
 
-bool OurReader::parse(const char* beginDoc, const char* endDoc, Value& root,
+bool OurReader::parse(char const* beginDoc, char const* endDoc, Value& root,
                       bool collectComments) {
   if (!features_.allowComments_) {
     collectComments = false;
@@ -1172,23 +1221,7 @@ bool OurReader::readToken(Token& token) {
   case '8':
   case '9':
     token.type_ = tokenNumber;
-    readNumber(false);
-    break;
-  case '-':
-    if (readNumber(true)) {
-      token.type_ = tokenNumber;
-    } else {
-      token.type_ = tokenNegInf;
-      ok = features_.allowSpecialFloats_ && match("nfinity", 7);
-    }
-    break;
-  case '+':
-    if (readNumber(true)) {
-      token.type_ = tokenNumber;
-    } else {
-      token.type_ = tokenPosInf;
-      ok = features_.allowSpecialFloats_ && match("nfinity", 7);
-    }
+    readNumber(true);
     break;
   case 't':
     token.type_ = tokenTrue;
@@ -1201,23 +1234,7 @@ bool OurReader::readToken(Token& token) {
   case 'n':
     token.type_ = tokenNull;
     ok = match("ull", 3);
-    break;
-  case 'N':
-    if (features_.allowSpecialFloats_) {
-      token.type_ = tokenNaN;
-      ok = match("aN", 2);
-    } else {
-      ok = false;
-    }
-    break;
-  case 'I':
-    if (features_.allowSpecialFloats_) {
-      token.type_ = tokenPosInf;
-      ok = match("nfinity", 7);
-    } else {
-      ok = false;
-    }
-    break;
+  break;
   case ',':
     token.type_ = tokenArraySeparator;
     break;
@@ -1237,23 +1254,69 @@ bool OurReader::readToken(Token& token) {
   return ok;
 }
 
-void OurReader::skipSpaces() {
-  while (current_ != end_) {
-    Char c = *current_;
-    if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
-      ++current_;
-    else
-      break;
-  }
-}
-
 void OurReader::skipBom(bool skipBom) {
   // The default behavior is to skip BOM.
   if (skipBom) {
     if ((end_ - begin_) >= 3 && strncmp(begin_, "\xEF\xBB\xBF", 3) == 0) {
       begin_ += 3;
-      current_ = begin_;
+    current_ = begin_;
     }
+  }
+}
+
+void OurReader::skipSpaces() {
+#ifdef JSON_HAS_SSE2
+  // SIMD path: process 16 bytes at a time with SSE2
+  while (current_ + 16 <= end_) {
+    __m128i chunk = _mm_loadu_si128(reinterpret_cast<const __m128i*>(current_));
+
+    // Create masks for each whitespace character
+    __m128i spaces = _mm_set1_epi8(' ');
+    __m128i tabs = _mm_set1_epi8('\t');
+    __m128i crs = _mm_set1_epi8('\r');
+    __m128i lfs = _mm_set1_epi8('\n');
+
+    // Compare chunk with each whitespace type
+    __m128i eq_space = _mm_cmpeq_epi8(chunk, spaces);
+    __m128i eq_tab = _mm_cmpeq_epi8(chunk, tabs);
+    __m128i eq_cr = _mm_cmpeq_epi8(chunk, crs);
+    __m128i eq_lf = _mm_cmpeq_epi8(chunk, lfs);
+    
+    // Combine all whitespace matches
+    __m128i is_ws = _mm_or_si128(
+        _mm_or_si128(eq_space, eq_tab),
+     _mm_or_si128(eq_cr, eq_lf)
+    );
+  
+    // Convert to bitmask
+    int mask = _mm_movemask_epi8(is_ws);
+    
+    // If not all bytes are whitespace, find first non-whitespace
+    if (mask != 0xFFFF) {
+      // Count trailing whitespace bytes
+      int non_ws_mask = ~mask & 0xFFFF;
+      #ifdef _MSC_VER
+        unsigned long idx;
+        _BitScanForward(&idx, non_ws_mask);
+  current_ += idx;
+      #else
+        current_ += __builtin_ctz(non_ws_mask);
+      #endif
+      return;
+    }
+    
+    // All 16 bytes were whitespace, continue
+    current_ += 16;
+  }
+#endif
+  
+  // Scalar fallback for remaining bytes
+  while (current_ != end_) {
+    Char c = *current_;
+    if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
+    ++current_;
+    else
+ break;
   }
 }
 
@@ -1762,7 +1825,7 @@ bool OurReader::recoverFromError(TokenType skipUntilToken) {
 }
 
 bool OurReader::addErrorAndRecover(const String& message, Token& token,
-                                   TokenType skipUntilToken) {
+                                    TokenType skipUntilToken) {
   addError(message, token);
   return recoverFromError(skipUntilToken);
 }

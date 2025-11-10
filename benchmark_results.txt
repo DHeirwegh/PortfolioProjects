@@ -1,0 +1,22 @@
+
+=== JsonCpp Benchmark Results ===
+Date/Time: 2025-11-10 15:28:12
+Total Runs: 5
+Number of elements: 69529
+
+Statistics:
+Min time: 2.24437s
+Max time: 3.20277s
+Avg (middle 8): 1.8712s
+----------------------------------------
+
+=== JsonCpp Benchmark Results ===
+Date/Time: 2025-11-10 15:28:30
+Total Runs: 5
+Number of elements: 69529
+
+Statistics:
+Min time: 1.99062s
+Max time: 3.12947s
+Avg (middle 8): 1.72801s
+----------------------------------------

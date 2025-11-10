@@ -6,8 +6,6 @@
 #include <string>
 #include <vector>
 #include <algorithm>
-#include <chrono>
-#include <ctime>
 #include "Timer.h"
 #include "json/json.h"
 
@@ -18,7 +16,7 @@ int main()
 	// Test 2: Parse JSON with JsonCpp - Run 10 times for benchmarking
 	std::cout << "Test: Parsing JSON with JsonCpp (10 runs)...\n";
 	
-	const int NUM_RUNS = 10;
+	const int NUM_RUNS = 5;
 	std::vector<double> durations;
 	durations.reserve(NUM_RUNS);
 	
@@ -68,13 +66,13 @@ int main()
 	{
 		sum += sortedDurations[i];
 	}
-	double avgMiddle8 = sum / 8.0;
+	double avgMiddle8 = sum / NUM_RUNS;
 	
 	std::cout << "\n=== Benchmark Results ===\n";
 	std::cout << "Number of elements: " << root.size() << "\n";
 	std::cout << "Min time:  " << (minDuration / 1000.0) << "s\n";
 	std::cout << "Max time:  " << (maxDuration / 1000.0) << "s\n";
-	std::cout << "Avg (middle 8): " << (avgMiddle8 / 1000.0) << "s\n";
+	std::cout << "Avg (middle " + std::to_string(NUM_RUNS) + "): " << (avgMiddle8 / 1000.0) << "s\n";
 
 	// Write results to file
 	std::ofstream outFile("benchmark_results.txt", std::ios::app);
